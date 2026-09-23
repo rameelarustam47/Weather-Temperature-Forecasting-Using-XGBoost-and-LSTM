@@ -1,0 +1,368 @@
+
+!pip install -q xgboost tensorflow scikit-learn pandas matplotlib
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from io import StringIO
+
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.preprocessing import StandardScaler
+
+from xgboost import XGBRegressor
+
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout, Input
+from tensorflow.keras.callbacks import EarlyStopping
+
+np.random.seed(42)
+tf.random.set_seed(42)
+
+readings_csv = """Reading,Date,HourNum,Period,Temperature,Humidity,RainFlag
+1,2026-08-03,9.0,Morning,29.0,62,0
+2,2026-08-03,14.4,Noon,31.0,81,1
+3,2026-08-03,20.0,Evening,33.0,70,0
+4,2026-08-04,9.0,Morning,30.5,75,0
+5,2026-08-04,14.0,Noon,31.5,62,0
+6,2026-08-04,19.0,Evening,33.0,79,0
+7,2026-08-05,10.5,Morning,35.5,71,0
+8,2026-08-05,14.0,Noon,36.0,66,1
+9,2026-08-05,19.0,Evening,36.5,68,0
+10,2026-08-06,9.0,Morning,31.0,74,0
+11,2026-08-06,14.0,Noon,36.0,55,0
+12,2026-08-06,19.0,Evening,34.5,70,0
+13,2026-08-07,9.0,Morning,28.5,65,0
+14,2026-08-07,14.0,Noon,34.0,50,1
+15,2026-08-07,19.0,Evening,32.0,53,1
+16,2026-08-08,9.0,Morning,33.0,70,1
+17,2026-08-08,14.0,Noon,34.0,68,1
+18,2026-08-08,19.0,Evening,32.0,74,1
+19,2026-08-09,9.0,Morning,33.0,75,0
+20,2026-08-09,14.0,Noon,33.5,65,0
+21,2026-08-09,19.0,Evening,33.0,72,0
+22,2026-08-10,11.0,Noon,36.0,74,0
+23,2026-08-10,13.0,Noon,37.0,62,0
+24,2026-08-10,18.42,Evening,32.5,68,0
+25,2026-08-11,7.0,Morning,29.0,77,0
+26,2026-08-11,14.2,Noon,36.0,66,0
+27,2026-08-11,18.28,Evening,35.0,82,0
+28,2026-08-12,6.55,Morning,31.5,74,0
+29,2026-08-12,14.47,Noon,36.0,60,0
+30,2026-08-12,18.9,Evening,35.0,67,0
+31,2026-08-13,6.0,Morning,30.0,73,0
+32,2026-08-13,14.07,Noon,32.0,77,0
+33,2026-08-13,19.05,Evening,35.0,77,0
+34,2026-08-14,11.0,Noon,34.0,81,0
+35,2026-08-14,14.42,Noon,27.0,82,1
+36,2026-08-14,19.5,Evening,32.0,78,0
+37,2026-08-15,7.0,Morning,30.0,75,0
+38,2026-08-15,13.58,Noon,36.0,64,0
+39,2026-08-15,19.53,Evening,34.0,81,0
+40,2026-08-16,5.1,Morning,33.0,74,0
+41,2026-08-16,14.43,Noon,32.5,63,0
+42,2026-08-16,18.88,Evening,31.5,71,0
+43,2026-08-17,9.68,Morning,36.5,77,0
+44,2026-08-17,13.85,Noon,38.0,51,0
+45,2026-08-17,19.83,Evening,36.0,71,0
+46,2026-08-18,6.22,Morning,33.0,69,0
+47,2026-08-18,14.0,Noon,37.0,60,0
+48,2026-08-18,19.05,Evening,36.0,82,0
+49,2026-08-19,6.0,Morning,28.0,79,0
+50,2026-08-19,14.72,Noon,37.0,67,0
+51,2026-08-19,18.07,Evening,29.0,77,0
+52,2026-08-20,6.0,Morning,28.0,79,0
+53,2026-08-20,15.27,Noon,31.0,67,1
+54,2026-08-20,18.07,Evening,34.0,77,0
+55,2026-08-21,6.0,Morning,28.0,74,0
+56,2026-08-21,13.42,Noon,37.5,63,0
+57,2026-08-21,18.0,Evening,29.0,73,0
+58,2026-08-22,7.0,Morning,29.0,70,0
+59,2026-08-22,13.27,Noon,39.0,60,0
+60,2026-08-22,19.23,Evening,35.0,68,0
+61,2026-08-23,6.0,Morning,29.0,66,0
+62,2026-08-23,12.53,Noon,36.0,51,0
+63,2026-08-23,19.22,Evening,35.0,58,0
+"""
+
+df = pd.read_csv(StringIO(readings_csv))
+df["Date"] = pd.to_datetime(df["Date"])
+df = df.sort_values(["Date", "HourNum"]).reset_index(drop=True)
+print("Shape:", df.shape)
+df.head(10)
+
+**Cell 5 — Inspect the data**
+
+colors = {"Morning": "tab:blue", "Noon": "tab:red", "Evening": "tab:orange"}
+plt.figure(figsize=(12,4))
+for period, group in df.groupby("Period"):
+    plt.scatter(group.index, group["Temperature"], label=period, color=colors[period], s=25)
+plt.plot(df.index, df["Temperature"], color="grey", alpha=0.4, linewidth=1)
+plt.title("Faisalabad — All 63 Readings (Morning / Noon / Evening)")
+plt.xlabel("Reading number (chronological)")
+plt.ylabel("Temperature (°C)")
+plt.legend()
+plt.grid(alpha=0.3)
+plt.tight_layout()
+plt.show()
+
+print(df.groupby("Period")["Temperature"].describe()[["mean","std","min","max"]])
+
+**Cell 6 — Feature engineering**
+
+feat = df.copy()
+feat["hour_sin"] = np.sin(2*np.pi*feat["HourNum"]/24)
+feat["hour_cos"] = np.cos(2*np.pi*feat["HourNum"]/24)
+feat["Target"] = feat["Temperature"].shift(-1)
+
+feat["lag1"] = feat["Temperature"].shift(1)
+feat["lag2"] = feat["Temperature"].shift(2)
+feat["lag3"] = feat["Temperature"].shift(3)
+feat["rolling3"] = feat["Temperature"].shift(1).rolling(3).mean()
+
+feat = pd.get_dummies(feat, columns=["Period"], prefix="Period", drop_first=True)
+for col in ["Period_Noon", "Period_Evening"]:
+    if col not in feat.columns:
+        feat[col] = 0
+
+feat = feat.dropna().reset_index(drop=True)
+
+feature_cols = ["Temperature", "Humidity", "RainFlag", "hour_sin", "hour_cos",
+                 "lag1", "lag2", "lag3", "rolling3", "Period_Noon", "Period_Evening"]
+
+X = feat[feature_cols]
+y = feat["Target"]
+
+print("Usable rows after feature engineering:", X.shape)
+feat[["Date","HourNum"] + feature_cols + ["Target"]].head(8)
+
+**Cell 7 — Train/val/test split**
+
+n = len(X)
+train_end = int(n * 0.70)
+val_end = int(n * 0.85)
+
+X_train, y_train = X.iloc[:train_end], y.iloc[:train_end]
+X_val, y_val = X.iloc[train_end:val_end], y.iloc[train_end:val_end]
+X_test, y_test = X.iloc[val_end:], y.iloc[val_end:]
+
+print("Train:", X_train.shape, " Val:", X_val.shape, " Test:", X_test.shape)
+
+xgb_model = XGBRegressor(
+    n_estimators=200,
+    max_depth=3,
+    learning_rate=0.05,
+    random_state=42
+)
+
+xgb_model.fit(X_train, y_train)
+xgb_pred = xgb_model.predict(X_test)
+
+xgb_mae = mean_absolute_error(y_test, xgb_pred)
+xgb_rmse = np.sqrt(mean_squared_error(y_test, xgb_pred))
+xgb_r2 = r2_score(y_test, xgb_pred)
+
+print(f"XGBoost  ->  MAE: {xgb_mae:.3f}   RMSE: {xgb_rmse:.3f}   R2: {xgb_r2:.3f}")
+
+**Cell 9 — Train XGBoost**
+
+
+
+
+
+baseline_pred = X_test["Temperature"].values
+
+base_mae = mean_absolute_error(y_test, baseline_pred)
+base_rmse = np.sqrt(mean_squared_error(y_test, baseline_pred))
+base_r2 = r2_score(y_test, baseline_pred)
+
+print(f"Persistence baseline  ->  MAE: {base_mae:.3f}   RMSE: {base_rmse:.3f}   R2: {base_r2:.3f}")
+
+**Cell 10 — Plot XGBoost results**
+
+plt.figure(figsize=(10,4))
+plt.plot(y_test.values, marker="o", label="Observed")
+plt.plot(xgb_pred, marker="o", label="XGBoost forecast")
+plt.plot(baseline_pred, marker="x", linestyle="--", color="grey", label="Persistence baseline")
+plt.title("XGBoost vs Baseline — Observed vs Forecasted Next Reading")
+plt.xlabel("Test sample")
+plt.ylabel("Temperature (°C)")
+plt.legend()
+plt.grid(alpha=0.3)
+plt.show()
+
+**Cell 11 — Feature importance**
+
+importances = pd.Series(xgb_model.feature_importances_, index=feature_cols).sort_values()
+plt.figure(figsize=(7,5))
+importances.plot(kind="barh", color="tab:orange")
+plt.title("XGBoost — Feature Importance")
+plt.xlabel("Importance")
+plt.tight_layout()
+plt.show()
+
+
+Cell 12 — Build LSTM sequences
+
+
+LOOKBACK = 6
+
+lstm_features = ["Temperature", "hour_sin", "hour_cos"]
+raw = df.copy()
+raw["hour_sin"] = np.sin(2*np.pi*raw["HourNum"]/24)
+raw["hour_cos"] = np.cos(2*np.pi*raw["HourNum"]/24)
+data = raw[lstm_features].values
+
+def make_sequences(data, lookback, target_col=0):
+    Xs, ys = [], []
+    for i in range(len(data) - lookback):
+        Xs.append(data[i:i+lookback])
+        ys.append(data[i+lookback, target_col])
+    return np.array(Xs), np.array(ys)
+
+X_seq, y_seq = make_sequences(data, LOOKBACK)
+print("Sequence X shape:", X_seq.shape, " y shape:", y_seq.shape)
+
+**Cell 13 — Split sequences**
+
+n_seq = len(X_seq)
+train_end_seq = int(n_seq * 0.70)
+val_end_seq = int(n_seq * 0.85)
+
+X_train_seq, y_train_seq = X_seq[:train_end_seq], y_seq[:train_end_seq]
+X_val_seq, y_val_seq = X_seq[train_end_seq:val_end_seq], y_seq[train_end_seq:val_end_seq]
+X_test_seq, y_test_seq = X_seq[val_end_seq:], y_seq[val_end_seq:]
+
+print("Train:", X_train_seq.shape, " Val:", X_val_seq.shape, " Test:", X_test_seq.shape)
+
+**Cell 14 — Scale temperature**
+
+temp_scaler = StandardScaler()
+temp_scaler.fit(X_train_seq[:, :, 0].reshape(-1, 1))
+
+def scale_temp_channel(X):
+    X = X.copy()
+    shape = X[:, :, 0].shape
+    X[:, :, 0] = temp_scaler.transform(X[:, :, 0].reshape(-1, 1)).reshape(shape)
+    return X
+
+X_train_scaled = scale_temp_channel(X_train_seq)
+X_val_scaled = scale_temp_channel(X_val_seq)
+X_test_scaled = scale_temp_channel(X_test_seq)
+
+y_train_scaled = temp_scaler.transform(y_train_seq.reshape(-1,1))
+y_val_scaled = temp_scaler.transform(y_val_seq.reshape(-1,1))
+y_test_scaled = temp_scaler.transform(y_test_seq.reshape(-1,1))
+
+**Cell 15 — Build and train LSTM**
+
+lstm_model = Sequential([
+    Input(shape=(LOOKBACK, len(lstm_features))),
+    LSTM(32),
+    Dropout(0.2),
+    Dense(1)
+])
+
+lstm_model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.001), loss="mse")
+
+early_stop = EarlyStopping(monitor="val_loss", patience=10, restore_best_weights=True)
+
+history = lstm_model.fit(
+    X_train_scaled, y_train_scaled,
+    validation_data=(X_val_scaled, y_val_scaled),
+    epochs=100,
+    batch_size=4,
+    callbacks=[early_stop],
+    verbose=1
+)
+
+**Cell 16 — Plot loss curve**
+
+plt.figure(figsize=(9,4))
+plt.plot(history.history["loss"], label="Train loss")
+plt.plot(history.history["val_loss"], label="Validation loss")
+plt.title("LSTM Training — Loss Curve")
+plt.xlabel("Epoch")
+plt.ylabel("MSE Loss")
+plt.legend()
+plt.grid(alpha=0.3)
+plt.show()
+
+**Cell 17 — Evaluate LSTM**
+
+lstm_pred_scaled = lstm_model.predict(X_test_scaled)
+lstm_pred = temp_scaler.inverse_transform(lstm_pred_scaled).flatten()
+y_test_actual = y_test_seq.flatten()
+
+lstm_mae = mean_absolute_error(y_test_actual, lstm_pred)
+lstm_rmse = np.sqrt(mean_squared_error(y_test_actual, lstm_pred))
+lstm_r2 = r2_score(y_test_actual, lstm_pred)
+
+print(f"LSTM  ->  MAE: {lstm_mae:.3f}   RMSE: {lstm_rmse:.3f}   R2: {lstm_r2:.3f}")
+
+**Cell 18 — Plot LSTM results**
+
+plt.figure(figsize=(10,4))
+plt.plot(y_test_actual, marker="o", label="Observed")
+plt.plot(lstm_pred, marker="o", label="LSTM forecast")
+plt.title("LSTM — Observed vs Forecasted Next Reading")
+plt.xlabel("Test sample")
+plt.ylabel("Temperature (°C)")
+plt.legend()
+plt.grid(alpha=0.3)
+plt.show()
+
+**Cell 19 — Compare all three**
+
+comparison = pd.DataFrame({
+    "Metric": ["MAE", "RMSE", "R2"],
+    "Persistence baseline": [round(base_mae,3), round(base_rmse,3), round(base_r2,3)],
+    "XGBoost": [round(xgb_mae,3), round(xgb_rmse,3), round(xgb_r2,3)],
+    "LSTM": [round(lstm_mae,3), round(lstm_rmse,3), round(lstm_r2,3)]
+})
+comparison
+
+**Cell 20 — Comparison bar chart**
+
+fig, ax = plt.subplots(figsize=(8,4))
+x = np.arange(3)
+width = 0.25
+ax.bar(x - width, comparison["Persistence baseline"], width, label="Baseline", color="grey")
+ax.bar(x, comparison["XGBoost"], width, label="XGBoost", color="tab:orange")
+ax.bar(x + width, comparison["LSTM"], width, label="LSTM", color="tab:green")
+ax.set_xticks(x)
+ax.set_xticklabels(comparison["Metric"])
+ax.set_title("Baseline vs XGBoost vs LSTM — Error Metrics")
+ax.legend()
+plt.tight_layout()
+plt.show()
+
+**Cell 21 — Forecast next unseen reading**
+
+last3 = df["Temperature"].values[-3:]
+next_hour_guess = (df["HourNum"].iloc[-1] + 11) % 24
+
+next_features = pd.DataFrame({
+    "Temperature": [df["Temperature"].values[-1]],
+    "Humidity": [df["Humidity"].values[-1]],
+    "RainFlag": [df["RainFlag"].values[-1]],
+    "hour_sin": [np.sin(2*np.pi*next_hour_guess/24)],
+    "hour_cos": [np.cos(2*np.pi*next_hour_guess/24)],
+    "lag1": [df["Temperature"].values[-1]],
+    "lag2": [df["Temperature"].values[-2]],
+    "lag3": [df["Temperature"].values[-3]],
+    "rolling3": [np.mean(last3)],
+    "Period_Noon": [0],
+    "Period_Evening": [0],
+})[feature_cols]
+
+xgb_next = xgb_model.predict(next_features)[0]
+print(f"XGBoost forecast for the next reading: {xgb_next:.2f} °C")
+
+last_window = data[-LOOKBACK:].copy()
+last_window = last_window.reshape(1, LOOKBACK, len(lstm_features))
+last_window_scaled = scale_temp_channel(last_window)
+
+lstm_next_scaled = lstm_model.predict(last_window_scaled)
+lstm_next = temp_scaler.inverse_transform(lstm_next_scaled)[0][0]
+print(f"LSTM forecast for the next reading: {lstm_next:.2f} °C")
